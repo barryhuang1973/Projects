@@ -1,0 +1,168 @@
+--Introduction:
+	-- This dataset is about a Superstore Giant from 2014 to 2017. 
+--Data Set
+ --The dataset includes 3 tables:
+ 	--customers:
+		--Customer ID => Unique ID to identify each Customer.
+		--Customer Name => Name of the Customer.
+		--Segment => The segment where the Customer belongs.
+		--Country => Country of residence of the Customer.
+		--City => City of residence of of the Customer.
+		--State => State of residence of the Customer.
+		--Postal Code => Postal Code of every Customer.
+		--Region => Region where the Customer belong.
+			
+	--products:
+		--Product ID => Unique ID of the Product.
+		--Category => Category of the product ordered.
+		--Sub-Category => Sub-Category of the product ordered.
+		--Product Name => Name of the Product
+	
+	--orders:
+		--Order ID => Unique Order ID for each Customer.
+		--Order Date => Order Date of the product.
+		--Ship Date => Shipping Date of the Product.
+		--Ship Mode=> Shipping Mode specified by the Customer.
+		--Sales => Sales of the Product.
+		--Quantity => Quantity of the Product.
+		--Discount => Discount provided.
+		--Profit => Profit/Loss incurred.
+		
+--Objective:
+	-- Understand which products, regions, categories and cusstomr segments the company should target or avoid.
+
+--Analysis
+ -- In order to analysis easily, I will extract the year and month from the shipping date. The shipping date would be treated as the 
+ --order completed day. Aand I add one column named "delivery_days" to show the number of days the customers need to wait for the orders.
+
+ALTER TABLE orders
+ADD COLUMN shipping_year INTEGER,
+ADD COLUMN shipping_month INTEGER,
+ADD COLUMN delivery_days INTEGER;
+
+UPDATE orders
+SET shipping_year = EXTRACT (year FROM ship_date);
+UPDATE orders
+SET shipping_month =EXTRACT(month FROM ship_date);
+UPDATE orders
+SET delivery_days= ship_date-order_date;
+
+
+--There are only 42 rows of data belongs to 2018, but it will affect the analysis easily. Here I will delete all data in 2018.
+DELETE FROM orders
+WHERE shipping_year=2018;
+
+
+
+--Check customers quantity by segment, state and region
+SELECT region, state, COUNT(DISTINCT (customer_id)) AS customer_number
+FROM customers
+GROUP BY region, state, segment
+ORDER BY region, state, segment;
+
+--Check customers by segment by region
+
+SELECT region, segment, COUNT(DISTINCT (customer_id)) AS customer_number
+FROM customers
+GROUP BY region, segment
+ORDER BY region,segment;
+
+--Check total sales, profit by year
+SELECT shipping_year, SUM(sales) AS total_sales, SUM(profit)AS total_profit
+FROM orders
+GROUP BY shipping_year
+ORDER BY shipping_year;
+
+--Check sales, profit,discount by region, state and segment
+SELECT shipping_year,region,segment, SUM(sales) AS total_sales, SUM(profit)AS total_profit, SUM(discount) AS total_discount
+FROM customers C
+INNER JOIN orders O ON c.customer_id = o.customer_id
+GROUP BY  shipping_year,region, segment
+ORDER BY shipping_year,region;
+
+
+
+--Check sales, profit, and discount by product, category and sub_category in each year, create the view
+
+SELECT shipping_year,  category,  SUM(sales) AS total_sales, SUM(profit) AS total_profit
+FROM orders O
+INNER JOIN products P ON O.product_id = P.product_id
+GROUP BY shipping_year,  category
+ORDER BY shipping_year,  category;
+
+--Check the top 3 sub_categories by sales and prfit
+SELECT category, sub_category, sub_category_sales_rank,sub_category_profit_rank
+FROM (
+	WITH order_product AS (
+		SELECT*
+		FROM orders O
+		INNER JOIN products P ON O.product_id = P.product_id)
+
+	SELECT sub_category, category, SUM(sales), SUM(profit),
+	RANK() OVER (PARTITION BY category ORDER BY SUM(sales) DESC) AS sub_category_sales_rank,
+	RANK() OVER (PARTITION BY category ORDER BY SUM(profit) DESC) AS sub_category_profit_rank
+	FROM order_product
+	GROUP BY category, sub_category) C
+WHERE sub_category_sales_rank =1 OR sub_category_profit_rank=1;
+
+--Check top 3 products by sales and profit
+
+SELECT category, product_name, product_sales_rank,product_profit_rank
+FROM (
+	WITH order_product AS (
+		SELECT*
+		FROM orders O
+		INNER JOIN products P ON O.product_id = P.product_id)
+
+	SELECT product_name, category, SUM(sales), SUM(profit),
+	RANK() OVER (PARTITION BY category ORDER BY SUM(sales) DESC) AS product_sales_rank,
+	RANK() OVER (PARTITION BY category ORDER BY SUM(profit) DESC) AS product_profit_rank
+	FROM order_product
+	GROUP BY category, product_name) C
+WHERE product_sales_rank <4 OR product_profit_rank<4;
+
+--Check average sales and profit by region and segment
+CREATE VIEW average_sales_profit AS
+SELECT shipping_year, region, segment, AVG(sales) AS avg_sales, AVG(profit) AS avg_profit
+FROM orders O
+INNER JOIN customers C ON O.customer_id = C.customer_id
+GROUP BY shipping_year, region, segment
+ORDER BY shipping_year, region;
+
+--Check average delivery days for each ship mode
+
+SELECT ship_mode, ROUND(AVG(delivery_days),0)
+FROM orders
+GROUP BY ship_mode;
+
+--check ship modes used in regions
+CREATE VIEW order_count_region AS
+SELECT shipping_year, region, COUNT(DISTINCT(order_id)) AS order_count, ship_mode
+FROM orders O
+INNER JOIN customers C ON O.customer_id = C.customer_id
+GROUP BY shipping_year, region, ship_mode;
+
+--check sales and profit by ship mode
+
+SELECT shipping_year, ship_mode, SUM(sales) AS sales_shipmode, SUM(profit) AS profit_shipmode
+FROM orders
+GROUP BY shipping_year, ship_mode;
+
+--Check negative profit product, orders	
+CREATE VIEW negative_profit_segment_region AS
+	WITH  negative_profit AS
+		(SELECT * 
+		 FROM orders
+		 WHERE profit<0
+		)
+
+	SELECT product_name, SUM(profit), segment, region
+	FROM negative_profit N
+	INNER JOIN products P ON N.product_id = P.product_id
+	INNER JOIN customers C ON N.customer_id = C.customer_id
+	GROUP BY region, segment, product_name
+
+
+
+
+
